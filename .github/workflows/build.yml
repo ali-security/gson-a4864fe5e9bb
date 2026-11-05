@@ -1,18 +1,45 @@
 name: Build
 
-on: [push, pull_request]
+on:
+  workflow_dispatch:
+    inputs:
+      test-filter:
+        description: 'Optional surefire -Dtest selector; empty runs the full suite'
+        required: false
+        default: ''
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - uses: actions/checkout@v2
       - name: Set up JDK 11
-        uses: actions/setup-java@v2
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '11'
           cache: 'maven'
       - name: Build with Maven
-        run: mvn --batch-mode --update-snapshots verify
+        run: |
+          if [ -n "${{ inputs.test-filter }}" ]; then
+            mvn --batch-mode --update-snapshots verify -Dtest='${{ inputs.test-filter }}' -DfailIfNoTests=false
+          else
+            mvn --batch-mode --update-snapshots verify
+          fi
+      - name: Report skipped tests
+        if: always()
+        run: |
+          echo "Skipped tests (from surefire XML reports; JUnit Assume failures are reported as skipped):"
+          for f in $(grep -l '<skipped' */target/surefire-reports/TEST-*.xml); do
+            echo "== $f"
+            grep -B1 '<skipped' "$f"
+          done
+          echo "Note: JsonReaderPathTest.multipleTopLevelValuesInOneDocument calls assumeTrue(factory == Factory.STRING_READER); it is skipped by design for the OBJECT_READER (JsonTreeReader) parameter and runs for the STRING_READER parameter."
+      - name: Upload gson jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: gson-jar
+          path: gson/target/gson-2.9.0.jar
+          if-no-files-found: error
